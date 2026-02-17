@@ -8,6 +8,18 @@ import {
 } from "../middlewares/jwt.js";
 import Users from "../models/userModel.js";
 
+const buildCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === "production";
+
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "None" : "Lax",
+    // domain: isProduction ? ".teatimetelugu.com" : "localhost", // 🔥 important
+    path: "/", // MUST be identical always
+  };
+};
+
 /**
  * Register a new user
  */
@@ -240,19 +252,10 @@ export const refreshToken = async (req, res) => {
 
     const user = await Users.findOne({ refreshToken });
     if (!user) {
-      const isProduction = process.env.NODE_ENV === "production";
-      // Clear cookies if refresh token is invalid
-      res.clearCookie("accessToken", {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? "None" : "Lax",
-      });
+      const cookieOptions = buildCookieOptions();
 
-      res.clearCookie("refreshToken", {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: isProduction ? "None" : "Lax",
-      });
+      res.clearCookie("accessToken", cookieOptions);
+      res.clearCookie("refreshToken", cookieOptions);
 
       return res.status(403).json({
         status: "fail",
@@ -290,19 +293,15 @@ export const refreshToken = async (req, res) => {
     user.refreshToken = newRefreshToken;
     await user.save();
 
-    const isProduction = process.env.NODE_ENV === "production";
+    const cookieOptions = buildCookieOptions();
 
     res.cookie("accessToken", newAccessToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "None" : "Lax",
+      ...cookieOptions,
       maxAge: 15 * 60 * 1000,
     });
 
     res.cookie("refreshToken", newRefreshToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "None" : "Lax",
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -350,26 +349,16 @@ export const googleCallback = (req, res) => {
       // const refreshToken = createRefreshJWT(user);
       await Users.findByIdAndUpdate(user._id, { refreshToken });
 
-      const isProduction = process.env.NODE_ENV === "production";
+      const cookieOptions = buildCookieOptions();
 
-      const cookieOptions = {
-        httpOnly: true,
-        secure: isProduction, // HTTPS only in production
-        sameSite: isProduction ? "None" : "Lax",
-        domain: isProduction ? ".teatimetelugu.com" : "localhost", // 🔥 important
-        path: "/", // always include
-      };
-
-      /* access token */
       res.cookie("accessToken", accessToken, {
         ...cookieOptions,
-        maxAge: 15 * 60 * 1000, // 15 mins
+        maxAge: 15 * 60 * 1000,
       });
 
-      /* refresh token */
       res.cookie("refreshToken", refreshToken, {
         ...cookieOptions,
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
       res.redirect(`${client}`);

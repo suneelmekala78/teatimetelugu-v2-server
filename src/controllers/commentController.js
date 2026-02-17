@@ -22,7 +22,7 @@ const getRepliesRecursive = async (commentId) => {
     replies.map(async (reply) => {
       const children = await getRepliesRecursive(reply._id);
       return { ...reply.toObject(), replies: children };
-    })
+    }),
   );
 
   return nestedReplies;
@@ -40,14 +40,14 @@ export const getComments = async (req, res) => {
         res,
         400,
         "fail",
-        "Valid language (en/te) is required!"
+        "Valid language (en/te) is required!",
       );
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Top-level comments only
     const topComments = await Comment.find({
-      news: newsId, 
+      news: newsId,
       language,
       parentComment: null,
     })
@@ -61,7 +61,7 @@ export const getComments = async (req, res) => {
       topComments.map(async (comment) => {
         const replies = await getRepliesRecursive(comment._id);
         return { ...comment.toObject(), replies };
-      })
+      }),
     );
 
     const totalComments = await Comment.countDocuments({
@@ -100,7 +100,7 @@ export const addReplyComment = async (req, res) => {
         res,
         400,
         "fail",
-        "Valid language (en/te) is required!"
+        "Valid language (en/te) is required!",
       );
 
     const parentComment = await Comment.findById(parentCommentId);
@@ -115,12 +115,19 @@ export const addReplyComment = async (req, res) => {
       language,
     });
 
+    const populatedComment = await Comment.findById(newReply._id)
+      .populate({
+        path: "postedBy",
+        select: "fullName profileUrl",
+      })
+      .lean();
+
     return sendResponse(
       res,
       201,
       "success",
       "Reply added successfully!",
-      newReply
+      populatedComment,
     );
   } catch (error) {
     console.error("addReplyComment error:", error);
@@ -142,7 +149,7 @@ export const addComment = async (req, res) => {
         res,
         400,
         "fail",
-        "Valid language (en/te) is required!"
+        "Valid language (en/te) is required!",
       );
 
     const newComment = await Comment.create({
@@ -152,12 +159,20 @@ export const addComment = async (req, res) => {
       language,
     });
 
+    /* populate user info BEFORE sending */
+    const populatedComment = await Comment.findById(newComment._id)
+      .populate({
+        path: "postedBy",
+        select: "fullName profileUrl", // only what UI needs
+      })
+      .lean();
+
     return sendResponse(
       res,
       201,
       "success",
       "Comment added successfully!",
-      newComment
+      populatedComment,
     );
   } catch (error) {
     console.error("addComment error:", error);
@@ -182,7 +197,7 @@ export const deleteComment = async (req, res) => {
         res,
         403,
         "fail",
-        "You are not allowed to delete this comment"
+        "You are not allowed to delete this comment",
       );
     }
 
@@ -220,7 +235,7 @@ export const likeComment = async (req, res) => {
       res,
       200,
       "success",
-      hasLiked ? "Like removed" : "Liked successfully"
+      hasLiked ? "Like removed" : "Liked successfully",
     );
   } catch (error) {
     console.error("likeComment error:", error);
@@ -251,7 +266,7 @@ export const dislikeComment = async (req, res) => {
       res,
       200,
       "success",
-      hasDisliked ? "Dislike removed" : "Disliked successfully"
+      hasDisliked ? "Dislike removed" : "Disliked successfully",
     );
   } catch (error) {
     console.error("dislikeComment error:", error);

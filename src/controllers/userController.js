@@ -30,7 +30,7 @@ export const getCurrentUser = async (req, res) => {
     }
 
     const thisUser = await Users.findOne({ _id: user?._id }).select(
-      "-password -otp"
+      "-password -otp",
     );
 
     if (!thisUser) {
@@ -217,7 +217,7 @@ export const getAdminsWriters = async (req, res) => {
         role: { $in: ["admin", "writer"] },
         _id: { $ne: user?._id },
       },
-      { _id: 1, fullName: 1 }
+      { _id: 1, fullName: 1 },
     );
 
     if (!users || users.length === 0) {

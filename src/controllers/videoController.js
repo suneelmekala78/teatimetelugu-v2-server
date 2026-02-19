@@ -443,7 +443,7 @@ const getSuggestedVideos = async (currentNewsId) => {
         createdAt: { $gte: oneWeekAgo },
       },
     },
-    { $sample: { size: 20 } },
+    { $sample: { size: 9 } },
   ]);
 };
 

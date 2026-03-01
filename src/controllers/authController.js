@@ -8,17 +8,33 @@ import {
 } from "../middlewares/jwt.js";
 import Users from "../models/userModel.js";
 
+const MAX_ACTIVE_SESSIONS = 10;
+
 const buildCookieOptions = () => {
   const isProduction = process.env.NODE_ENV === "production";
+  const cookieDomain =
+    isProduction && process.env.COOKIE_DOMAIN
+      ? process.env.COOKIE_DOMAIN
+      : undefined;
 
   return {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? "None" : "Lax",
-    // domain: isProduction ? ".teatimetelugu.com" : "localhost", // 🔥 important
-    path: "/", // MUST be identical always
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+    path: "/",
   };
 };
+
+const buildRefreshTokenQuery = (token) => ({
+  $or: [{ refreshTokens: token }, { refreshToken: token }],
+});
+
+const removeRefreshToken = (tokens = [], token) =>
+  tokens.filter((value) => value && value !== token);
+
+const addRefreshToken = (tokens = [], token) =>
+  [token, ...removeRefreshToken(tokens, token)].slice(0, MAX_ACTIVE_SESSIONS);
 
 /**
  * Register a new user
@@ -163,22 +179,19 @@ export const login = async (req, res) => {
     const accessToken = createJWT(tokenUser);
     const refreshToken = createRefreshJWT(tokenUser);
 
+    user.refreshTokens = addRefreshToken(user.refreshTokens, refreshToken);
     user.refreshToken = refreshToken;
     await user.save();
 
-    const isProduction = process.env.NODE_ENV === "production";
+    const cookieOptions = buildCookieOptions();
 
     res.cookie("accessToken", accessToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "None" : "Lax",
+      ...cookieOptions,
       maxAge: 15 * 60 * 1000, // 15 mins
     });
 
     res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? "None" : "Lax",
+      ...cookieOptions,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -210,23 +223,30 @@ export const login = async (req, res) => {
  */
 export const logout = async (req, res) => {
   const { refreshToken } = req.cookies;
-
-  const isProduction = process.env.NODE_ENV === "production";
+  const cookieOptions = buildCookieOptions();
 
   if (refreshToken) {
-    await Users.updateOne({ refreshToken }, { $unset: { refreshToken: 1 } });
+    const user = await Users.findOne(buildRefreshTokenQuery(refreshToken)).select(
+      "+refreshToken",
+    );
+
+    if (user) {
+      user.refreshTokens = removeRefreshToken(user.refreshTokens, refreshToken);
+
+      if (user.refreshToken === refreshToken) {
+        user.refreshToken = null;
+      }
+
+      await user.save();
+    }
   }
 
   res.clearCookie("accessToken", {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "None" : "Lax",
+    ...cookieOptions,
   });
 
   res.clearCookie("refreshToken", {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "None" : "Lax",
+    ...cookieOptions,
   });
 
   return res.status(200).send({
@@ -250,7 +270,9 @@ export const refreshToken = async (req, res) => {
       });
     }
 
-    const user = await Users.findOne({ refreshToken });
+    const user = await Users.findOne(buildRefreshTokenQuery(refreshToken)).select(
+      "+refreshToken",
+    );
     if (!user) {
       const cookieOptions = buildCookieOptions();
 
@@ -268,8 +290,14 @@ export const refreshToken = async (req, res) => {
     try {
       decoded = JWT.verify(refreshToken, process.env.JWT_REFRESH_SECRET_KEY);
     } catch (err) {
-      // Clear invalid refresh token from database
-      await Users.findByIdAndUpdate(user._id, { $unset: { refreshToken: 1 } });
+      user.refreshTokens = removeRefreshToken(user.refreshTokens, refreshToken);
+
+      if (user.refreshToken === refreshToken) {
+        user.refreshToken = null;
+      }
+
+      await user.save();
+
       return res.status(403).json({
         status: "fail",
         message: "Refresh token expired or invalid!",
@@ -289,7 +317,11 @@ export const refreshToken = async (req, res) => {
     const newAccessToken = createJWT(tokenUser);
     const newRefreshToken = createRefreshJWT(tokenUser);
 
-    // Save new refreshToken
+    // Save new refreshToken for this device/session
+    user.refreshTokens = addRefreshToken(
+      removeRefreshToken(user.refreshTokens, refreshToken),
+      newRefreshToken,
+    );
     user.refreshToken = newRefreshToken;
     await user.save();
 
@@ -347,7 +379,13 @@ export const googleCallback = (req, res) => {
 
       // const accessToken = createJWT(user);
       // const refreshToken = createRefreshJWT(user);
-      await Users.findByIdAndUpdate(user._id, { refreshToken });
+      const dbUser = await Users.findById(user._id).select("+refreshToken");
+
+      if (dbUser) {
+        dbUser.refreshTokens = addRefreshToken(dbUser.refreshTokens, refreshToken);
+        dbUser.refreshToken = refreshToken;
+        await dbUser.save();
+      }
 
       const cookieOptions = buildCookieOptions();
 

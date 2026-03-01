@@ -41,9 +41,6 @@ passport.use(
         const token = createJWT(tokenUser); // short-lived
         const refreshToken = createRefreshJWT(tokenUser); // long-lived
 
-        user.refreshToken = refreshToken;
-        await user.save(); 
-
         // Return only safe user fields
         const safeUser = {
           _id: user._id,

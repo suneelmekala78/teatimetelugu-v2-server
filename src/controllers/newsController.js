@@ -1039,6 +1039,7 @@ export const getSearchedNews = async (req, res) => {
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
+    const fetchWindow = Math.min(200, skip + limitNum);
 
     // Common projection for all models
     const baseProjection = {
@@ -1081,17 +1082,20 @@ export const getSearchedNews = async (req, res) => {
       // Search across all three models in parallel
       const [newsPromise, galleryPromise, videoPromise] = await Promise.all([
         News.find(baseFilter)
-          .sort({ score: { $meta: "textScore" }, createdAt: -1 })
+          .sort({ score: { $meta: "textScore" } })
+          .limit(fetchWindow)
           .select(baseProjection)
           .populate("postedBy", "fullName profileUrl")
           .lean(),
         Gallery.find(baseFilter)
-          .sort({ score: { $meta: "textScore" }, createdAt: -1 })
+          .sort({ score: { $meta: "textScore" } })
+          .limit(fetchWindow)
           .select(baseProjection)
           .populate("postedBy", "fullName profileUrl")
           .lean(),
         Video.find(baseFilter) // Fixed: Changed from Videos to Video
-          .sort({ score: { $meta: "textScore" }, createdAt: -1 })
+          .sort({ score: { $meta: "textScore" } })
+          .limit(fetchWindow)
           .select(baseProjection)
           .populate("postedBy", "fullName profileUrl")
           .lean(),
@@ -1152,7 +1156,7 @@ export const getSearchedNews = async (req, res) => {
 
       const [modelResults, modelCount] = await Promise.all([
         Model.find(baseFilter)
-          .sort({ score: { $meta: "textScore" }, createdAt: -1 })
+          .sort({ score: { $meta: "textScore" } })
           .skip(skip)
           .limit(limitNum)
           .select(baseProjection)
@@ -1246,6 +1250,7 @@ export const getSearchedNewsOptimized = async (req, res) => {
     const pageNum = Math.max(1, parseInt(page));
     const limitNum = Math.min(50, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
+    const fetchWindow = Math.min(200, skip + limitNum);
 
     const baseFilter = { $text: { $search: searchQuery } };
 
@@ -1276,7 +1281,7 @@ export const getSearchedNewsOptimized = async (req, res) => {
       const Model = getModelByType(type);
       const [results, totalCount] = await Promise.all([
         Model.find(baseFilter)
-          .sort({ score: { $meta: "textScore" }, createdAt: -1 })
+          .sort({ score: { $meta: "textScore" } })
           .skip(skip)
           .limit(limitNum)
           .select(baseProjection)
@@ -1311,8 +1316,8 @@ export const getSearchedNewsOptimized = async (req, res) => {
     const searchPromises = models.map(({ model, type, limit }) =>
       model
         .find(baseFilter)
-        .sort({ score: { $meta: "textScore" }, createdAt: -1 })
-        .limit(limit)
+        .sort({ score: { $meta: "textScore" } })
+        .limit(Math.min(fetchWindow, limit))
         .select(baseProjection)
         .populate("postedBy", "fullName profileUrl")
         .lean()

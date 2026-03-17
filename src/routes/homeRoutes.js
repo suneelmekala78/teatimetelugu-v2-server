@@ -16,6 +16,7 @@ import {
   getHomeGrid,
   getHomeLongAd,
   getHomeShortAd,
+  getHomePageData,
   getHotTopics,
   getMovieCollections,
   getMoviePoster,
@@ -50,6 +51,7 @@ const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get("/data", getDashboardData);
+router.get("/home-page-data", getHomePageData);
 router.get("/search", getSearchedNews);
 router.get("/get-featured-posts", getHomeGrid);
 router.get("/get-breaking-news", getBreakingNews);

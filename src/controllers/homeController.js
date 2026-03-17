@@ -1748,3 +1748,81 @@ export const getFilesLinks = async (req, res) => {
     });
   }
 };
+
+// ============ AGGREGATED HOME PAGE DATA ============
+// Single endpoint that fetches all Home-model data in ONE DB query
+// instead of 5+ separate queries for breakingNews, trends, hotTopics, movies, etc.
+
+export const getHomePageData = async (req, res) => {
+  try {
+    const homeAssets = await Home.findOne()
+      .populate({
+        path: "breakingNews.news",
+        select: "title newsId category mainUrl createdAt postedBy",
+        populate: { path: "postedBy", select: "fullName profileUrl" },
+      })
+      .populate({
+        path: "trends.news",
+        select: "title newsId category mainUrl createdAt postedBy",
+        populate: { path: "postedBy", select: "fullName profileUrl" },
+      })
+      .populate({
+        path: "hotTopics.news",
+        select: "title newsId category mainUrl createdAt postedBy",
+        populate: { path: "postedBy", select: "fullName profileUrl" },
+      })
+      .lean();
+
+    if (!homeAssets) {
+      return res.status(200).json({
+        status: "success",
+        breakingNews: [],
+        trends: [],
+        hotTopics: [],
+        movieReleases: [],
+        movieCollections: [],
+      });
+    }
+
+    // Process breakingNews
+    const breakingNews = (homeAssets.breakingNews || [])
+      .filter((item) => item.news)
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({ ...item.news, position: item.position }));
+
+    // Process trends
+    const trends = (homeAssets.trends || [])
+      .filter((item) => item.news)
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({ ...item.news, position: item.position }));
+
+    // Process hotTopics
+    const hotTopics = (homeAssets.hotTopics || [])
+      .filter((item) => item.news)
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({ ...item.news, position: item.position }));
+
+    // Movie data (no populate needed)
+    const movieReleases = homeAssets.movieReleases
+      ? homeAssets.movieReleases.slice().reverse()
+      : [];
+    const movieCollections = homeAssets.movieCollections
+      ? homeAssets.movieCollections.slice().reverse()
+      : [];
+
+    return res.status(200).json({
+      status: "success",
+      breakingNews,
+      trends,
+      hotTopics,
+      movieReleases,
+      movieCollections,
+    });
+  } catch (error) {
+    console.error("Error in getHomePageData:", error);
+    return res.status(500).json({
+      status: "fail",
+      message: "Internal server error",
+    });
+  }
+};

@@ -57,14 +57,14 @@ app.use(passport.initialize());
 
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60, // 60 req/min per IP
+  max: 200, // 200 req/min per IP
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 const speedLimiter = slowDown({
   windowMs: 60 * 1000,
-  delayAfter: 30,
+  delayAfter: 100,
   delayMs: () => 500,
 });
 

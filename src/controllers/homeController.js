@@ -1760,23 +1760,42 @@ export const getFilesLinks = async (req, res) => {
 
 export const getHomePageData = async (req, res) => {
   try {
-    const homeAssets = await Home.findOne()
-      .populate({
-        path: "breakingNews.news",
-        select: "title newsId category mainUrl createdAt postedBy",
-        populate: { path: "postedBy", select: "fullName profileUrl" },
-      })
-      .populate({
-        path: "trends.news",
-        select: "title newsId category mainUrl createdAt postedBy",
-        populate: { path: "postedBy", select: "fullName profileUrl" },
-      })
-      .populate({
-        path: "hotTopics.news",
-        select: "title newsId category mainUrl createdAt postedBy",
-        populate: { path: "postedBy", select: "fullName profileUrl" },
-      })
-      .lean();
+    // Fetch Home model data, trending news, and reviews in parallel
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [homeAssets, trendingNews, reviewsNews] = await Promise.all([
+      Home.findOne()
+        .populate({
+          path: "breakingNews.news",
+          select: "title newsId category mainUrl createdAt postedBy",
+          populate: { path: "postedBy", select: "fullName profileUrl" },
+        })
+        .populate({
+          path: "trends.news",
+          select: "title newsId category mainUrl createdAt postedBy",
+          populate: { path: "postedBy", select: "fullName profileUrl" },
+        })
+        .populate({
+          path: "hotTopics.news",
+          select: "title newsId category mainUrl createdAt postedBy",
+          populate: { path: "postedBy", select: "fullName profileUrl" },
+        })
+        .lean(),
+
+      // Most-viewed: trending news from the past week
+      News.find({ createdAt: { $gte: oneWeekAgo } })
+        .sort({ reactionsCount: -1, commentsCount: -1, createdAt: -1 })
+        .limit(6)
+        .select("title newsId category mainUrl")
+        .lean(),
+
+      // Reviews: latest 4 reviews
+      News.find({ "category.en": "reviews" })
+        .sort({ createdAt: -1 })
+        .limit(4)
+        .select("title newsId category mainUrl movieRating")
+        .lean(),
+    ]);
 
     if (!homeAssets) {
       return res.status(200).json({
@@ -1786,6 +1805,8 @@ export const getHomePageData = async (req, res) => {
         hotTopics: [],
         movieReleases: [],
         movieCollections: [],
+        trendingNews: trendingNews || [],
+        reviewsNews: reviewsNews || [],
       });
     }
 
@@ -1822,6 +1843,8 @@ export const getHomePageData = async (req, res) => {
       hotTopics,
       movieReleases,
       movieCollections,
+      trendingNews: trendingNews || [],
+      reviewsNews: reviewsNews || [],
     });
   } catch (error) {
     console.error("Error in getHomePageData:", error);

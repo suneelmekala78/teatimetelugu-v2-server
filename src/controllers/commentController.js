@@ -12,20 +12,41 @@ const sendResponse = (res, statusCode, status, message, data = null) => {
   });
 };
 
-// ✅ Recursive function to get nested replies
-const getRepliesRecursive = async (commentId) => {
-  const replies = await Comment.find({ parentComment: commentId })
+// Flat query for all replies under given comment IDs, then nest in memory
+const buildReplyTree = (allReplies, parentId) => {
+  return allReplies
+    .filter((r) => String(r.parentComment) === String(parentId))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((r) => ({ ...r, replies: buildReplyTree(allReplies, r._id) }));
+};
+
+const getRepliesForComments = async (commentIds) => {
+  if (!commentIds.length) return new Map();
+
+  // Single query: fetch ALL nested replies for these top-level comments
+  const allReplies = await Comment.find({
+    $or: commentIds.map((id) => ({ parentComment: id })),
+  })
     .populate("postedBy", "fullName profileUrl")
-    .sort({ createdAt: -1 });
+    .lean();
 
-  const nestedReplies = await Promise.all(
-    replies.map(async (reply) => {
-      const children = await getRepliesRecursive(reply._id);
-      return { ...reply.toObject(), replies: children };
-    }),
-  );
+  // If replies have their own replies, fetch those too (max 2 levels deep)
+  if (allReplies.length) {
+    const replyIds = allReplies.map((r) => r._id);
+    const nestedReplies = await Comment.find({
+      parentComment: { $in: replyIds },
+    })
+      .populate("postedBy", "fullName profileUrl")
+      .lean();
+    allReplies.push(...nestedReplies);
+  }
 
-  return nestedReplies;
+  // Build nested tree per top-level comment
+  const map = new Map();
+  for (const id of commentIds) {
+    map.set(String(id), buildReplyTree(allReplies, id));
+  }
+  return map;
 };
 
 // ✅ Get comments by newsId + language (with nested replies)
@@ -45,30 +66,33 @@ export const getComments = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Top-level comments only
-    const topComments = await Comment.find({
-      news: newsId,
-      language,
-      parentComment: null,
-    })
-      .populate("postedBy", "fullName profileUrl")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Fetch nested replies recursively
-    const commentsWithReplies = await Promise.all(
-      topComments.map(async (comment) => {
-        const replies = await getRepliesRecursive(comment._id);
-        return { ...comment.toObject(), replies };
+    // Top-level comments + count in parallel
+    const [topComments, totalComments] = await Promise.all([
+      Comment.find({
+        news: newsId,
+        language,
+        parentComment: null,
+      })
+        .populate("postedBy", "fullName profileUrl")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Comment.countDocuments({
+        news: newsId,
+        language,
+        parentComment: null,
       }),
-    );
+    ]);
 
-    const totalComments = await Comment.countDocuments({
-      news: newsId,
-      language,
-      parentComment: null,
-    });
+    // Batch-fetch all replies (max 2 levels) in 1-2 queries instead of N+1
+    const commentIds = topComments.map((c) => c._id);
+    const replyMap = await getRepliesForComments(commentIds);
+
+    const commentsWithReplies = topComments.map((comment) => ({
+      ...comment,
+      replies: replyMap.get(String(comment._id)) || [],
+    }));
 
     return sendResponse(res, 200, "success", "Comments fetched successfully", {
       comments: commentsWithReplies,

@@ -421,30 +421,34 @@ export const getFilteredNewsCursor = async (req, res) => {
   }
 };
 
-// Helper: optimized suggested news
+// Helper: optimized suggested news using $sample (single DB round-trip)
 const getSuggestedNews = async (excludeId, limit = 20) => {
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
-  const filter = {
-    _id: { $ne: excludeId },
-    createdAt: { $gte: oneWeekAgo },
-  };
+  const match = { createdAt: { $gte: oneWeekAgo } };
+  if (excludeId) match._id = { $ne: excludeId };
 
-  // Count documents for random skip
-  const count = await News.countDocuments(filter);
-  if (count === 0) return [];
-
-  const maxSkip = Math.max(count - limit, 0);
-  const randomSkip = Math.floor(Math.random() * (maxSkip + 1));
-
-  const suggestedNews = await News.find(filter)
-    .sort({ createdAt: -1 })
-    .skip(randomSkip)
-    .limit(limit)
-    .select("title newsId mainUrl category subCategory createdAt postedBy")
-    .populate("postedBy", "fullName profileUrl")
-    .lean();
+  const suggestedNews = await News.aggregate([
+    { $match: match },
+    { $sample: { size: limit } },
+    {
+      $lookup: {
+        from: "users",
+        localField: "postedBy",
+        foreignField: "_id",
+        as: "postedBy",
+        pipeline: [{ $project: { fullName: 1, profileUrl: 1 } }],
+      },
+    },
+    { $unwind: { path: "$postedBy", preserveNullAndEmptyArrays: true } },
+    {
+      $project: {
+        title: 1, newsId: 1, mainUrl: 1, category: 1,
+        subCategory: 1, createdAt: 1, postedBy: 1,
+      },
+    },
+  ]);
 
   return suggestedNews;
 };
@@ -815,49 +819,18 @@ export const getCategoryNews = async (req, res) => {
     if (category) match["category.en"] = category;
     if (subcategory) match["subCategory.en"] = subcategory;
 
-    const result = await News.aggregate([
-      { $match: match },
-
-      // Sort newest first
-      { $sort: { createdAt: -1 } },
-
-      // Facet: get paginated results + total count
-      {
-        $facet: {
-          news: [
-            { $skip: skip },
-            { $limit: limitNum },
-            // Populate postedBy
-            {
-              $lookup: {
-                from: "users",
-                localField: "postedBy",
-                foreignField: "_id",
-                as: "postedBy",
-              },
-            },
-            { $unwind: "$postedBy" }, // flatten array
-            {
-              $project: {
-                title: 1,
-                newsId: 1,
-                category: 1,
-                subCategory: 1,
-                mainUrl: 1,
-                createdAt: 1,
-                movieRating: 1,
-                "postedBy.fullName": 1,
-                "postedBy.profileUrl": 1,
-              },
-            },
-          ],
-          total: [{ $count: "count" }],
-        },
-      },
+    // Parallel find + count — much faster than $facet because
+    // find() walks the compound index directly and stops after `limit` docs
+    const [news, total] = await Promise.all([
+      News.find(match)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .select("title newsId category subCategory mainUrl createdAt movieRating")
+        .populate("postedBy", "fullName profileUrl")
+        .lean(),
+      News.countDocuments(match),
     ]);
-
-    const news = result[0].news || [];
-    const total = result[0].total[0]?.count || 0;
 
     return res.status(200).json({
       status: "success",
@@ -983,7 +956,6 @@ export const getLatestNews = async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(12)
       .select(projection)
-      .populate("postedBy", "fullName profileUrl")
       .lean();
 
     return res.status(200).json({ status: "success", news }); 
@@ -1054,10 +1026,6 @@ export const getSearchedNews = async (req, res) => {
       type = "all",
     } = req.query;
 
-    // console.log("Search query received:", query);
-    // console.log("Search parameters:", { query, category, time, page, limit, type });
-
-    // Validate required query parameter
     if (!query || query.trim() === "") {
       return res.status(400).json({
         status: "fail",
@@ -1071,30 +1039,21 @@ export const getSearchedNews = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
     const fetchWindow = Math.min(200, skip + limitNum);
 
-    // Common projection for all models
+    // Lean projection — only fields needed for search result cards
     const baseProjection = {
       title: 1,
       mainUrl: 1,
       newsId: 1,
       category: 1,
       createdAt: 1,
-      postedBy: 1,
-      reactionsCount: 1,
-      commentsCount: 1,
-      description: 1,
-      galleryPics: 1,
     };
 
-    // Build base filter for text search
     const baseFilter = { $text: { $search: searchQuery } };
-    // console.log("MongoDB text search filter:", baseFilter);
 
-    // Add category filter if provided
     if (category && category !== "all") {
       baseFilter["category.en"] = category;
     }
 
-    // Add time filter if provided
     if (time && time !== "all") {
       const dateFilter = getDateFilter(time);
       if (dateFilter) {
@@ -1102,73 +1061,45 @@ export const getSearchedNews = async (req, res) => {
       }
     }
 
-    // console.log("Final filter:", JSON.stringify(baseFilter, null, 2));
-
     let results = [];
     let totalCount = 0;
 
-    // Search based on type
     if (type === "all") {
-      // Search across all three models in parallel
-      const [newsPromise, galleryPromise, videoPromise] = await Promise.all([
-        News.find(baseFilter)
-          .sort({ score: { $meta: "textScore" } })
-          .limit(fetchWindow)
-          .select(baseProjection)
-          .populate("postedBy", "fullName profileUrl")
-          .lean(),
-        Gallery.find(baseFilter)
-          .sort({ score: { $meta: "textScore" } })
-          .limit(fetchWindow)
-          .select(baseProjection)
-          .populate("postedBy", "fullName profileUrl")
-          .lean(),
-        Video.find(baseFilter) // Fixed: Changed from Videos to Video
-          .sort({ score: { $meta: "textScore" } })
-          .limit(fetchWindow)
-          .select(baseProjection)
-          .populate("postedBy", "fullName profileUrl")
-          .lean(),
-      ]);
-
-      // console.log("News results count:", newsPromise.length);
-      // console.log("Gallery results count:", galleryPromise.length);
-      // console.log("Video results count:", videoPromise.length);
-
-      // Combine and mix results from all models
-      const allResults = [
-        ...newsPromise.map((item) => ({ ...item, type: "news" })),
-        ...galleryPromise.map((item) => ({ ...item, type: "gallery" })),
-        ...videoPromise.map((item) => ({ ...item, type: "video" })),
-      ];
-
-      // console.log("Total combined results before pagination:", allResults.length);
-
-      // Sort combined results by relevance score and date
-      allResults.sort((a, b) => {
-        // If MongoDB text score is available, use it
-        if (a.score !== undefined && b.score !== undefined) {
-          return b.score - a.score;
-        }
-        // Otherwise sort by date
-        return new Date(b.createdAt) - new Date(a.createdAt);
-      });
-
-      // Get total count
-      const [newsCount, galleryCount, videoCount] = await Promise.all([
-        News.countDocuments(baseFilter),
-        Gallery.countDocuments(baseFilter),
-        Video.countDocuments(baseFilter), // Fixed: Changed from Videos to Video
-      ]);
+      // All 6 queries (3 find + 3 count) in a SINGLE Promise.all
+      const [newsResults, galleryResults, videoResults, newsCount, galleryCount, videoCount] =
+        await Promise.all([
+          News.find(baseFilter)
+            .sort({ score: { $meta: "textScore" } })
+            .limit(fetchWindow)
+            .select(baseProjection)
+            .lean(),
+          Gallery.find(baseFilter)
+            .sort({ score: { $meta: "textScore" } })
+            .limit(fetchWindow)
+            .select(baseProjection)
+            .lean(),
+          Video.find(baseFilter)
+            .sort({ score: { $meta: "textScore" } })
+            .limit(fetchWindow)
+            .select(baseProjection)
+            .lean(),
+          News.countDocuments(baseFilter),
+          Gallery.countDocuments(baseFilter),
+          Video.countDocuments(baseFilter),
+        ]);
 
       totalCount = newsCount + galleryCount + videoCount;
-      // console.log("Total counts:", { newsCount, galleryCount, videoCount, totalCount });
 
-      // Apply pagination
+      const allResults = [
+        ...newsResults.map((item) => ({ ...item, type: "news" })),
+        ...galleryResults.map((item) => ({ ...item, type: "gallery" })),
+        ...videoResults.map((item) => ({ ...item, type: "video" })),
+      ];
+
+      allResults.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
       results = allResults.slice(skip, skip + limitNum);
-      // console.log("Results after pagination:", results.length);
     } else {
-      // Search in specific model only
       let Model;
       switch (type) {
         case "news":
@@ -1178,7 +1109,7 @@ export const getSearchedNews = async (req, res) => {
           Model = Gallery;
           break;
         case "video":
-          Model = Video; // Fixed: Changed from Videos to Video
+          Model = Video;
           break;
         default:
           Model = News;
@@ -1190,22 +1121,15 @@ export const getSearchedNews = async (req, res) => {
           .skip(skip)
           .limit(limitNum)
           .select(baseProjection)
-          .populate("postedBy", "fullName profileUrl")
           .lean(),
         Model.countDocuments(baseFilter),
       ]);
 
       results = modelResults.map((item) => ({ ...item, type }));
       totalCount = modelCount;
-      // console.log(`Single model (${type}) results:`, results.length);
     }
 
-    // Calculate pagination info
     const totalPages = Math.ceil(totalCount / limitNum);
-    const hasNext = pageNum < totalPages;
-    const hasPrev = pageNum > 1;
-
-    // console.log("Final response - results count:", results.length);
 
     return res.status(200).json({
       status: "success",
@@ -1214,8 +1138,8 @@ export const getSearchedNews = async (req, res) => {
         currentPage: pageNum,
         totalPages,
         totalResults: totalCount,
-        hasNext,
-        hasPrev,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
         resultsPerPage: limitNum,
       },
       searchInfo: {
@@ -1228,7 +1152,6 @@ export const getSearchedNews = async (req, res) => {
   } catch (error) {
     console.error("Search Error:", error);
 
-    // Handle specific MongoDB errors
     if (error.name === "MongoError" && error.code === 27) {
       return res.status(400).json({
         status: "fail",

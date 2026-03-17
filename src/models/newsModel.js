@@ -83,8 +83,8 @@ const newsSchema = new mongoose.Schema(
 
 newsSchema.index({ "category.en": 1, createdAt: -1 });
 newsSchema.index({ "subCategory.en": 1, createdAt: -1 });
+newsSchema.index({ "category.en": 1, "subCategory.en": 1, createdAt: -1 });
 newsSchema.index({ createdAt: -1 }); // already sort by recent
-newsSchema.index({ category: 1 }); // if filtering by category
 newsSchema.index({ 
   "category.en": 1, 
   createdAt: -1, 

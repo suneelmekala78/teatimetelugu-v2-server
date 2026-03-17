@@ -9,12 +9,16 @@ import { uploadFile } from "../utils/s3Service.js";
 
 export const getDashboardData = async (req, res) => {
   try {
-    const newsCount = await News.countDocuments();
-    const galleriesCount = await Gallery.countDocuments();
-    const videosCount = await Videos.countDocuments();
-    const usersCount = await Users.countDocuments();
-    const writersCount = await Users.countDocuments({ role: "writer" });
-    const adminsCount = await Users.countDocuments({ role: "admin" });
+    // estimatedDocumentCount() uses collection metadata — near-instant
+    const [newsCount, galleriesCount, videosCount, usersCount, writersCount, adminsCount] =
+      await Promise.all([
+        News.estimatedDocumentCount(),
+        Gallery.estimatedDocumentCount(),
+        Videos.estimatedDocumentCount(),
+        Users.estimatedDocumentCount(),
+        Users.countDocuments({ role: "writer" }),
+        Users.countDocuments({ role: "admin" }),
+      ]);
 
     return res.status(200).json({
       status: "success",

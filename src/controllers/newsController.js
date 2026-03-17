@@ -294,6 +294,7 @@ export const getFilteredNews = async (req, res) => {
       writer = "",
       page = 1,
       limit = 10,
+      skipCount = "",
     } = req.query;
     const skip =
       (Math.max(parseInt(page, 10) || 1, 1) - 1) *
@@ -322,6 +323,8 @@ export const getFilteredNews = async (req, res) => {
       // "postedBy.profileUrl": 1,
     };
 
+    const shouldCount = skipCount !== "true";
+
     const [news, totalItems] = await Promise.all([
       News.find(match)
         .sort({ createdAt: -1 })
@@ -330,7 +333,7 @@ export const getFilteredNews = async (req, res) => {
         .select(projection)
         .populate("postedBy", "fullName profileUrl")
         .lean(),
-      News.countDocuments(match),
+      shouldCount ? News.countDocuments(match) : Promise.resolve(0),
     ]);
 
     return res.status(200).json({
@@ -991,6 +994,33 @@ export const getLatestNews = async (req, res) => {
 };
 
 // ========= Trending News =========
+export const getCategoryTopBulk = async (req, res) => {
+  try {
+    const { categories = "movies,gossips,politics,sports", limit = 3 } = req.query;
+    const catList = categories.split(",").map((c) => c.trim().toLowerCase()).filter(Boolean);
+    const lim = Math.min(parseInt(limit, 10) || 3, 10);
+
+    // Build $facet stages — one per category, single DB round-trip
+    const facet = {};
+    for (const cat of catList) {
+      facet[cat] = [
+        { $match: { "category.en": cat } },
+        { $sort: { createdAt: -1 } },
+        { $skip: lim },          // page 2
+        { $limit: lim },
+        { $project: { title: 1, newsId: 1, mainUrl: 1, category: 1, subCategory: 1, createdAt: 1 } },
+      ];
+    }
+
+    const [result] = await News.aggregate([{ $facet: facet }]);
+
+    return res.status(200).json({ status: "success", data: result });
+  } catch (error) {
+    console.error("getCategoryTopBulk error:", error);
+    return res.status(500).json({ status: "fail", message: error.message });
+  }
+};
+
 export const getTrendingNews = async (req, res) => {
   try {
     const oneWeekAgo = new Date();

@@ -8,6 +8,7 @@ import {
   deleteNews,
   editNews,
   getCategoryNews,
+  getCategoryTopBulk,
   getFilteredNews,
   getFilteredNewsCursor,
   getLatestNews,
@@ -21,6 +22,7 @@ import {
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+router.get("/category-top-bulk", getCategoryTopBulk);
 router.get("/filter", getFilteredNews);
 router.get("/filter-cursor", getFilteredNewsCursor);
 router.get('/search', getSearchedNews);

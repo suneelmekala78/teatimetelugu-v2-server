@@ -3,7 +3,11 @@ export const notFound = (_req, _res, next) =>
 
 export const errorHandler = (err, _req, res, _next) => {
   const status = err.status || 500;
-  const message = err.message || "Server error";
+  // Never leak internal error details in production
+  const message =
+    process.env.NODE_ENV === "production" && status >= 500
+      ? "Internal server error"
+      : err.message || "Server error";
   if (process.env.NODE_ENV !== "production") {
     console.error(err);
   }

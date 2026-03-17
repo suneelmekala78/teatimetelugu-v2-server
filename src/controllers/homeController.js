@@ -6,6 +6,7 @@ import Gallery from "../models/galleryModel.js";
 import Videos from "../models/videoModel.js";
 import mongoose from "mongoose";
 import { uploadFile } from "../utils/s3Service.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 export const getDashboardData = async (req, res) => {
   try {
@@ -1533,7 +1534,7 @@ export const setNewsShortAd = async (req, res) => {
 //=========== SEARCH ===========
 export const getSearchedNews = async (req, res) => {
   try {
-    const searchTerm = req.query.q;
+    const searchTerm = escapeRegex(req.query.q || "");
     const skip = Number(req.query.skip) || 0;
     const limit = Number(req.query.limit) || 9;
 

@@ -3,6 +3,7 @@ import Gallery from "../models/galleryModel.js";
 import Users from "../models/userModel.js";
 import { uploadFile, deleteFile } from "../utils/s3Service.js";
 import { generateUniqueSlug } from "../utils/generateUniqueSlug.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import { generateAudioForTexts } from "../utils/audio.js";
 
 export const addGallery = async (req, res) => {
@@ -289,9 +290,10 @@ export const getFilteredGallery = async (req, res) => {
 
     // Category filter
     if (category) {
+      const safeCat = escapeRegex(category);
       filter.$or = [
-        { "category.en": { $regex: category, $options: "i" } },
-        { "category.te": { $regex: category, $options: "i" } },
+        { "category.en": { $regex: safeCat, $options: "i" } },
+        { "category.te": { $regex: safeCat, $options: "i" } },
       ];
     }
 
@@ -302,13 +304,14 @@ export const getFilteredGallery = async (req, res) => {
 
     // Search filter
     if (searchText) {
+      const safeSearch = escapeRegex(searchText);
       filter.$or = [
-        { "title.en": { $regex: searchText, $options: "i" } },
-        { "title.te": { $regex: searchText, $options: "i" } },
-        { "description.en.text": { $regex: searchText, $options: "i" } },
-        { "description.te.text": { $regex: searchText, $options: "i" } },
-        { "tags.en": { $regex: searchText, $options: "i" } },
-        { "tags.te": { $regex: searchText, $options: "i" } },
+        { "title.en": { $regex: safeSearch, $options: "i" } },
+        { "title.te": { $regex: safeSearch, $options: "i" } },
+        { "description.en.text": { $regex: safeSearch, $options: "i" } },
+        { "description.te.text": { $regex: safeSearch, $options: "i" } },
+        { "tags.en": { $regex: safeSearch, $options: "i" } },
+        { "tags.te": { $regex: safeSearch, $options: "i" } },
       ];
     }
 

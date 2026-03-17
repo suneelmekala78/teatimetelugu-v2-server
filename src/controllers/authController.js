@@ -40,7 +40,9 @@ const addRefreshToken = (tokens = [], token) =>
  * Register a new user
  */
 export const register = async (req, res) => {
-  const { fullName, email, password, role = "user" } = req.body;
+  const { fullName, email, password } = req.body;
+  // role is always "user" for public registration — admin/writer set via admin panel only
+  const role = "user";
 
   try {
     if (!fullName?.trim() || !email?.trim() || !password) {
@@ -363,6 +365,12 @@ export const joinWithGoogle = (req, res) => {
 };
 
 export const googleCallback = (req, res) => {
+  // Allowlisted redirect origins to prevent open-redirect attacks
+  const allowedOrigins = (process.env.CLIENT_URLS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   passport.authenticate(
     "google",
     { session: false, failureRedirect: "/" },
@@ -375,7 +383,18 @@ export const googleCallback = (req, res) => {
       }
 
       const { user, token: accessToken, refreshToken } = data;
-      const client = req.query.state;
+      const client = req.query.state || "";
+
+      // Validate redirect target against allowlisted origins
+      let redirectUrl;
+      try {
+        const parsed = new URL(client);
+        redirectUrl = allowedOrigins.some((o) => parsed.origin === new URL(o).origin)
+          ? client
+          : allowedOrigins[0] || "/";
+      } catch {
+        redirectUrl = allowedOrigins[0] || "/";
+      }
 
       // const accessToken = createJWT(user);
       // const refreshToken = createRefreshJWT(user);
@@ -399,7 +418,7 @@ export const googleCallback = (req, res) => {
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
-      res.redirect(`${client}`);
+      res.redirect(`${redirectUrl}`);
     },
   )(req, res);
 };

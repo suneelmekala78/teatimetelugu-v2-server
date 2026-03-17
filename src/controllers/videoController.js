@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Videos from "../models/videoModel.js";
 import { generateUniqueSlug } from "../utils/generateUniqueSlug.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 /**
  * @desc Add a new video
@@ -116,11 +117,12 @@ export const getFilteredVideos = async (req, res) => {
 
     // ✅ Category filter
     if (category) {
+      const safeCat = escapeRegex(category);
       filter.$or = [
-        { "category.en": { $regex: category, $options: "i" } },
-        { "category.te": { $regex: category, $options: "i" } },
-        { "subCategory.en": { $regex: category, $options: "i" } },
-        { "subCategory.te": { $regex: category, $options: "i" } },
+        { "category.en": { $regex: safeCat, $options: "i" } },
+        { "category.te": { $regex: safeCat, $options: "i" } },
+        { "subCategory.en": { $regex: safeCat, $options: "i" } },
+        { "subCategory.te": { $regex: safeCat, $options: "i" } },
       ];
     }
 
@@ -131,9 +133,10 @@ export const getFilteredVideos = async (req, res) => {
 
     // ✅ Search filter
     if (searchText) {
+      const safeSearch = escapeRegex(searchText);
       filter.$or = [
-        { "title.en": { $regex: searchText, $options: "i" } },
-        { "title.te": { $regex: searchText, $options: "i" } },
+        { "title.en": { $regex: safeSearch, $options: "i" } },
+        { "title.te": { $regex: safeSearch, $options: "i" } },
       ];
     }
 
